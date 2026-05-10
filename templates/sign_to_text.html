@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta charset="UTF-8">
+<title>Gesturely Live</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Poppins:wght@600&display=swap" rel="stylesheet">
+
+<style>
+body {
+    background: #f8fafc;
+    font-family: 'Inter', sans-serif;
+    text-align: center;
+    padding: 30px;
+}
+
+h1 {
+    font-family: 'Poppins', sans-serif;
+}
+
+.video-box {
+    background: white;
+    display: inline-block;
+    padding: 15px;
+    border-radius: 20px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+}
+
+img {
+    width: 720px;
+    border-radius: 12px;
+}
+
+.btn {
+    margin: 10px;
+    padding: 10px 20px;
+    border: none;
+    background: #0f172a;
+    color: white;
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.btn:hover {
+    background: #06b6d4;
+}
+
+.output {
+    margin-top: 20px;
+    font-size: 18px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Gesturely Live</h1>
+
+<div class="video-box">
+    <img src="{{ url_for('video_feed') }}">
+</div>
+
+<div class="output">
+    <p><b>Mode:</b> <span id="mode">-</span></p>
+    <p><b>Word:</b> <span id="word">-</span></p>
+    <p><b>Sentence:</b> <span id="sentence">-</span></p>
+</div>
+
+<div>
+    <button class="btn" onclick="setMode('letter')">Letter Mode</button>
+    <button class="btn" onclick="setMode('word')">Word Mode</button>
+    <button class="btn" onclick="clearAll()">Reset</button>
+</div>
+
+<script>
+
+function setMode(m) {
+    fetch('/set_mode/' + m)
+    .then(r => r.json())
+    .then(d => {
+        document.getElementById("mode").innerText = d.mode;
+    });
+}
+
+function clearAll() {
+    fetch('/clear')
+}
+
+function update() {
+    fetch('/get_sentence')
+    .then(r => r.json())
+    .then(d => {
+        document.getElementById("word").innerText = d.current_word || "-";
+        document.getElementById("sentence").innerText = d.sentence || "-";
+        document.getElementById("mode").innerText = d.mode;
+    });
+}
+
+setInterval(update, 500);
+
+</script>
+
+</body>
+</html>
