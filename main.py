@@ -13,15 +13,24 @@ from collections import deque
 
 from extract_features import process_frame, extract_keypoints, FEATURE_SIZE
 
+# ===============================
+# FLASK
+# ===============================
 app = Flask(__name__)
 
-print("🟢 STEP 1: Flask initialized")
+print("🟢 Flask initialized")
 
+# ===============================
+# SAFE OBJECTS
+# ===============================
 safe_custom_objects = {
     "Orthogonal": tf.keras.initializers.Orthogonal,
     "DTypePolicy": tf.keras.mixed_precision.Policy
 }
 
+# ===============================
+# LETTER MODEL
+# ===============================
 print("➡ Loading letter model...")
 
 try:
@@ -34,12 +43,13 @@ try:
     )
 
     print("✔ Letter model loaded")
-
 except Exception as e:
     print("❌ Letter model failed:", e)
     letter_model = None
 
-
+# ===============================
+# WORD MODEL
+# ===============================
 print("➡ Loading word model...")
 
 word_model = None
@@ -57,36 +67,34 @@ try:
     Dense.__init__ = _patched_dense_init
 
     word_model = load_model(
-        "word_lstm_model.h5",
+        "wor_model.h5",
         compile=False,
-        custom_objects={
-            "Orthogonal": tf.keras.initializers.Orthogonal
-        }
+        custom_objects={"Orthogonal": tf.keras.initializers.Orthogonal}
     )
 
     print("✔ Word model loaded successfully")
+    print("WORD MODEL STATUS:", word_model)
 
 except Exception as e:
     print("❌ Word model failed:", e)
     word_model = None
 
+# ===============================
+# ENCODER
+# ===============================
+with open("wor_encoder.pickle", "rb") as f:
+    word_encoder = pickle.load(f)
 
-try:
-    with open("letter_encoder.pickle", "rb") as f:
-        encoder = pickle.load(f)
-    print("✔ Letter encoder loaded")
-except:
-    encoder = None
+ACTIONS = word_encoder.classes_
 
+with open("letter_encoder.pickle", "rb") as f:
+    letter_encoder = pickle.load(f)
 
-ACTIONS = [
-    'hello', 'my', 'thanks', 'iloveyou',
-    'yes', 'no', 'nothing', 'help',
-    'me', 'fine', 'name', 'more',
-    'learn', 'forget', 'right',
-    'need', 'same'
-]
+print("✔ Encoders loaded")
 
+# ===============================
+# MEDIAPIPE
+# ===============================
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
@@ -99,40 +107,34 @@ hands = mp_hands.Hands(
 
 print("✔ MediaPipe ready")
 
-
+# ===============================
+# STATE
+# ===============================
 mode = "letter"
 
 sentence = ""
 current_word = ""
 
 sequence = deque(maxlen=30)
-predictions = deque(maxlen=15)
+predictions = deque(maxlen=10)
 
-last_letter = ""
-last_word_pred = ""
+last_word = ""
+cooldown = 1.5
 last_time = 0
-word_lock_time = 0
 
-# stability
-stable_word = -1
-stable_count = 0
-LOCK_THRESHOLD = 6   # FIXED (was too strict)
-COOLDOWN = 1.2       # faster response
+# reduce strictness
+STABLE_THRESHOLD = 4
 
-
+# ===============================
+# CAMERA
+# ===============================
 def generate_frames():
 
     global sentence, current_word, mode
     global sequence, predictions
-    global last_letter, last_word_pred
-    global last_time, word_lock_time
-    global stable_word, stable_count
+    global last_word, last_time
 
     cap = cv2.VideoCapture(0)
-
-    if not cap.isOpened():
-        print("❌ CAMERA NOT OPENED")
-        return
 
     while True:
 
@@ -142,64 +144,47 @@ def generate_frames():
 
         frame = cv2.flip(frame, 1)
 
-        # ===============================
-        # WORD MODE (FIXED ONLY HERE)
-        # ===============================
+        # ================= WORD MODE =================
         if mode == "word" and word_model:
 
-            try:
-                results = process_frame(frame)
-                features, frame = extract_keypoints(results, frame)
+            results = process_frame(frame)
+            features, frame = extract_keypoints(results, frame)
 
-                sequence.append(features)
+            sequence.append(features)
 
-                # 🔥 ONLY PREDICT WHEN READY
-                if len(sequence) == 30:
+            if len(sequence) == 30:
 
-                    inp = np.array(sequence, dtype=np.float32).reshape(1, 30, FEATURE_SIZE)
-                    pred = word_model.predict(inp, verbose=0)[0]
+                inp = np.array(sequence, dtype=np.float32).reshape(1, 30, FEATURE_SIZE)
 
-                    idx = int(np.argmax(pred))
-                    conf = float(np.max(pred))
+                pred = word_model.predict(inp, verbose=0)[0]
 
-                    predictions.append(idx)
+                idx = np.argmax(pred)
+                conf = float(np.max(pred))
 
-                    most_common = max(set(predictions), key=predictions.count)
-                    now = time.time()
+                predictions.append(idx)
 
-                    # stability tracking
-                    if most_common == stable_word:
-                        stable_count += 1
-                    else:
-                        stable_word = most_common
-                        stable_count = 0
+                # majority vote
+                most_common = max(set(predictions), key=predictions.count)
 
-                    # 🔥 FIXED THRESHOLD (prevents "no prediction")
-                    if (
-                        conf > 0.60 and
-                        stable_count >= LOCK_THRESHOLD and
-                        (now - word_lock_time) > COOLDOWN
-                    ):
+                word = ACTIONS[most_common]
 
-                        word = ACTIONS[most_common]
+                now = time.time()
 
-                        if word != "nothing" and word != last_word_pred:
-                            sentence += word + " "
-                            last_word_pred = word
-                            print(f"✅ WORD: {word} ({conf:.2f})")
+                # 🔥 MUCH RELAXED CONDITION (FIX)
+                if conf > 0.55 and (now - last_time) > cooldown:
 
-                        word_lock_time = now
-                        sequence.clear()
-                        predictions.clear()
-                        stable_count = 0
-                        stable_word = -1
+                    if word != "nothing" and word != last_word:
 
-            except Exception as e:
-                print("WORD ERROR:", e)
+                        sentence += word + " "
+                        last_word = word
+                        last_time = now
 
-        # ===============================
-        # LETTER MODE (UNCHANGED)
-        # ===============================
+                        print("WORD:", word, conf)
+
+                    sequence.clear()
+                    predictions.clear()
+
+        # ================= LETTER MODE =================
         elif mode == "letter" and letter_model:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -223,29 +208,25 @@ def generate_frames():
 
                         inp = np.array(letter_row, dtype=np.float32).reshape(1, 1, 42)
 
-                        try:
-                            pred = letter_model.predict(inp, verbose=0)
-                            idx = np.argmax(pred)
-                            conf = float(pred[0][idx])
+                        pred = letter_model.predict(inp, verbose=0)
+                        idx = np.argmax(pred)
+                        conf = float(pred[0][idx])
 
-                            if conf > 0.85 and encoder:
-                                try:
-                                    letter = encoder.inverse_transform([idx])[0]
-                                except:
-                                    letter = str(idx)
+                        if conf > 0.85:
+                            try:
+                                letter = letter_encoder.inverse_transform([idx])[0]
+                            except:
+                                letter = str(idx)
 
-                                current_word += letter
+                            current_word += letter
 
-                        except:
-                            pass
-
-
+        # ================= UI =================
         cv2.rectangle(frame, (0, 0), (1200, 150), (0, 0, 0), -1)
 
         cv2.putText(frame, f"Mode: {mode}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-        cv2.putText(frame, "Text: " + current_word,
+        cv2.putText(frame, "Word: " + current_word,
                     (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         cv2.putText(frame, "Sentence: " + sentence,
@@ -258,7 +239,9 @@ def generate_frames():
                b'Content-Type: image/jpeg\r\n\r\n' +
                frame + b'\r\n')
 
+    cap.release()
 
+# ================= ROUTES (UNCHANGED) =================
 @app.route('/')
 def home():
     return render_template('index.html')
@@ -274,31 +257,27 @@ def get_sentence():
 
 @app.route('/set_mode/<m>')
 def set_mode(m):
-    global mode, sequence, predictions, current_word, last_letter, last_word_pred
+    global mode, sequence, predictions, current_word, last_word
 
-    if m in ["letter", "word"]:
-        mode = m
-        sequence.clear()
-        predictions.clear()
-        current_word = ""
-        last_letter = ""
-        last_word_pred = ""
+    mode = m
+    sequence.clear()
+    predictions.clear()
+    current_word = ""
+    last_word = ""
 
     return jsonify({"mode": mode})
 
 @app.route('/clear')
 def clear():
-    global sentence, current_word, sequence, predictions, last_letter, last_word_pred
+    global sentence, current_word, sequence, predictions, last_word
 
     sentence = ""
     current_word = ""
     sequence.clear()
     predictions.clear()
-    last_letter = ""
-    last_word_pred = ""
+    last_word = ""
 
     return jsonify({"status": "cleared"})
-
 
 @app.route('/sign_to_text')
 def sign_to_text():
@@ -308,18 +287,10 @@ def sign_to_text():
 def text_to_sign():
     return render_template('text_to_sign.html')
 
-
+# ================= START =================
 def open_browser():
     webbrowser.open_new("http://127.0.0.1:5000/")
 
-
 if __name__ == "__main__":
-
     Timer(2, open_browser).start()
-
-    app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=False,
-        use_reloader=False
-    )
+    app.run(debug=False)
