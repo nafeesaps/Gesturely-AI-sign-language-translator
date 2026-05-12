@@ -8,48 +8,81 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Poppins:wght@600&display=swap" rel="stylesheet">
 
 <style>
-body {
-    background: #f8fafc;
-    font-family: 'Inter', sans-serif;
-    text-align: center;
-    padding: 30px;
+
+body{
+    margin:0;
+    padding:30px;
+    background:#f8fafc;
+    font-family:'Inter',sans-serif;
+    text-align:center;
 }
 
-h1 {
-    font-family: 'Poppins', sans-serif;
+h1{
+    font-family:'Poppins',sans-serif;
+    color:#0f172a;
+    margin-bottom:25px;
 }
 
-.video-box {
-    background: white;
-    display: inline-block;
-    padding: 15px;
-    border-radius: 20px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+.video-box{
+    background:white;
+    display:inline-block;
+    padding:15px;
+    border-radius:20px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.1);
 }
 
-img {
-    width: 720px;
-    border-radius: 12px;
+img{
+    width:720px;
+    border-radius:15px;
 }
 
-.btn {
-    margin: 10px;
-    padding: 10px 20px;
-    border: none;
-    background: #0f172a;
-    color: white;
-    border-radius: 10px;
-    cursor: pointer;
+.sentence-box{
+    width:720px;
+    margin:25px auto;
+    background:white;
+    border-radius:20px;
+    padding:20px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.08);
+    text-align:left;
 }
 
-.btn:hover {
-    background: #06b6d4;
+.label{
+    font-size:18px;
+    font-weight:600;
+    color:#334155;
+    margin-bottom:10px;
 }
 
-.output {
-    margin-top: 20px;
-    font-size: 18px;
+.value{
+    min-height:40px;
+    padding:12px;
+    background:#f1f5f9;
+    border-radius:12px;
+    font-size:22px;
+    color:#0f172a;
+    word-wrap:break-word;
 }
+
+.buttons{
+    margin-top:25px;
+}
+
+.btn{
+    border:none;
+    padding:12px 22px;
+    margin:10px;
+    border-radius:12px;
+    background:#0f172a;
+    color:white;
+    cursor:pointer;
+    font-size:16px;
+    transition:0.2s;
+}
+
+.btn:hover{
+    background:#06b6d4;
+}
+
 </style>
 </head>
 
@@ -61,43 +94,74 @@ img {
     <img src="{{ url_for('video_feed') }}">
 </div>
 
-<div class="output">
-    <p><b>Mode:</b> <span id="mode">-</span></p>
-    <p><b>Word:</b> <span id="word">-</span></p>
-    <p><b>Sentence:</b> <span id="sentence">-</span></p>
+<div class="sentence-box">
+
+    <div class="label">
+        Sentence
+    </div>
+
+    <div class="value" id="sentence">
+        -
+    </div>
+
 </div>
 
-<div>
-    <button class="btn" onclick="setMode('letter')">Letter Mode</button>
-    <button class="btn" onclick="setMode('word')">Word Mode</button>
-    <button class="btn" onclick="clearAll()">Reset</button>
+<div class="buttons">
+
+    <button class="btn" onclick="setMode('letter')">
+        Letter Mode
+    </button>
+
+    <button class="btn" onclick="setMode('word')">
+        Word Mode
+    </button>
+
+    <button class="btn" onclick="clearAll()">
+        Reset
+    </button>
+
+    <button class="btn" onclick="goDashboard()">
+        Back to Dashboard
+    </button>
+
 </div>
 
 <script>
 
-function setMode(m) {
-    fetch('/set_mode/' + m)
-    .then(r => r.json())
-    .then(d => {
-        document.getElementById("mode").innerText = d.mode;
-    });
+function setMode(mode){
+
+    fetch('/set_mode/' + mode);
+
 }
 
-function clearAll() {
-    fetch('/clear')
+function clearAll(){
+
+    fetch('/clear');
+
+    document.getElementById("sentence").innerText = "-";
+
 }
 
-function update() {
+function goDashboard(){
+
+    window.location.href = "/";
+
+}
+
+function updateData(){
+
     fetch('/get_sentence')
-    .then(r => r.json())
-    .then(d => {
-        document.getElementById("word").innerText = d.current_word || "-";
-        document.getElementById("sentence").innerText = d.sentence || "-";
-        document.getElementById("mode").innerText = d.mode;
+    .then(response => response.json())
+    .then(data => {
+
+        document.getElementById("sentence").innerText =
+            data.sentence || "-";
+
     });
+
 }
 
-setInterval(update, 500);
+setInterval(updateData, 500);
 
 </script>
 

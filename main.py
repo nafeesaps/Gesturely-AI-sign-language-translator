@@ -13,25 +13,19 @@ from collections import deque
 
 from extract_features import process_frame, extract_keypoints, FEATURE_SIZE
 
-# ===============================
-# FLASK
-# ===============================
+
 app = Flask(__name__)
 
-print("🟢 Flask initialized")
+print(" Flask initialized")
 
-# ===============================
-# SAFE OBJECTS
-# ===============================
+
 safe_custom_objects = {
     "Orthogonal": tf.keras.initializers.Orthogonal,
     "DTypePolicy": tf.keras.mixed_precision.Policy
 }
 
-# ===============================
-# LETTER MODEL
-# ===============================
-print("➡ Loading letter model...")
+
+print(" Loading letter model...")
 
 try:
     from tensorflow.keras.models import load_model
@@ -42,15 +36,14 @@ try:
         custom_objects=safe_custom_objects
     )
 
-    print("✔ Letter model loaded")
+    print(" Letter model loaded")
+
 except Exception as e:
-    print("❌ Letter model failed:", e)
+    print(" Letter model failed:", e)
     letter_model = None
 
-# ===============================
-# WORD MODEL
-# ===============================
-print("➡ Loading word model...")
+
+print(" Loading word model...")
 
 word_model = None
 
@@ -69,19 +62,19 @@ try:
     word_model = load_model(
         "wor_model.h5",
         compile=False,
-        custom_objects={"Orthogonal": tf.keras.initializers.Orthogonal}
+        custom_objects={
+            "Orthogonal": tf.keras.initializers.Orthogonal
+        }
     )
 
-    print("✔ Word model loaded successfully")
+    print(" Word model loaded successfully")
     print("WORD MODEL STATUS:", word_model)
 
 except Exception as e:
-    print("❌ Word model failed:", e)
+    print("Word model failed:", e)
     word_model = None
 
-# ===============================
-# ENCODER
-# ===============================
+
 with open("wor_encoder.pickle", "rb") as f:
     word_encoder = pickle.load(f)
 
@@ -90,11 +83,9 @@ ACTIONS = word_encoder.classes_
 with open("letter_encoder.pickle", "rb") as f:
     letter_encoder = pickle.load(f)
 
-print("✔ Encoders loaded")
+print("Encoders loaded")
 
-# ===============================
-# MEDIAPIPE
-# ===============================
+
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
@@ -107,9 +98,6 @@ hands = mp_hands.Hands(
 
 print("✔ MediaPipe ready")
 
-# ===============================
-# STATE
-# ===============================
 mode = "letter"
 
 sentence = ""
@@ -119,75 +107,108 @@ sequence = deque(maxlen=30)
 predictions = deque(maxlen=10)
 
 last_word = ""
-cooldown = 1.5
 last_time = 0
 
-# reduce strictness
-STABLE_THRESHOLD = 4
+cooldown = 1.5
 
-# ===============================
-# CAMERA
-# ===============================
+# LETTER TIMER
+last_detection_time = time.time()
+LETTER_TIMEOUT = 2.0
+
+
 def generate_frames():
 
-    global sentence, current_word, mode
-    global sequence, predictions
-    global last_word, last_time
+    global sentence
+    global current_word
+    global mode
+
+    global sequence
+    global predictions
+
+    global last_word
+    global last_time
+    global last_detection_time
 
     cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        print(" CAMERA NOT OPENED")
+        return
 
     while True:
 
         success, frame = cap.read()
+
         if not success:
             break
 
         frame = cv2.flip(frame, 1)
 
-        # ================= WORD MODE =================
+        # WORD MODE
         if mode == "word" and word_model:
 
-            results = process_frame(frame)
-            features, frame = extract_keypoints(results, frame)
+            try:
+                results = process_frame(frame)
 
-            sequence.append(features)
+                
+                if results.multi_hand_landmarks:
 
-            if len(sequence) == 30:
+                    for hand_landmarks in results.multi_hand_landmarks:
 
-                inp = np.array(sequence, dtype=np.float32).reshape(1, 30, FEATURE_SIZE)
+                        mp_drawing.draw_landmarks(
+                            frame,
+                            hand_landmarks,
+                            mp_hands.HAND_CONNECTIONS
+                        )
 
-                pred = word_model.predict(inp, verbose=0)[0]
+                features, frame = extract_keypoints(results, frame)
 
-                idx = np.argmax(pred)
-                conf = float(np.max(pred))
+                sequence.append(features)
 
-                predictions.append(idx)
+                if len(sequence) == 30:
 
-                # majority vote
-                most_common = max(set(predictions), key=predictions.count)
+                    inp = np.array(sequence, dtype=np.float32)
+                    inp = inp.reshape(1, 30, FEATURE_SIZE)
 
-                word = ACTIONS[most_common]
+                    pred = word_model.predict(inp, verbose=0)[0]
 
-                now = time.time()
+                    idx = np.argmax(pred)
+                    conf = float(np.max(pred))
 
-                # 🔥 MUCH RELAXED CONDITION (FIX)
-                if conf > 0.55 and (now - last_time) > cooldown:
+                    predictions.append(idx)
 
-                    if word != "nothing" and word != last_word:
+                    most_common = max(
+                        set(predictions),
+                        key=predictions.count
+                    )
 
-                        sentence += word + " "
-                        last_word = word
-                        last_time = now
+                    word = ACTIONS[most_common]
 
-                        print("WORD:", word, conf)
+                    now = time.time()
 
-                    sequence.clear()
-                    predictions.clear()
+                    if conf > 0.55 and (now - last_time) > cooldown:
 
-        # ================= LETTER MODE =================
+                        if word != "nothing" and word != last_word:
+
+                            current_word = word
+                            sentence += word + " "
+
+                            last_word = word
+                            last_time = now
+
+                            print("WORD:", word, conf)
+
+                        sequence.clear()
+                        predictions.clear()
+
+            except Exception as e:
+                print("WORD ERROR:", e)
+
+
         elif mode == "letter" and letter_model:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
             results = hands.process(rgb)
 
             if results.multi_hand_landmarks:
@@ -201,83 +222,175 @@ def generate_frames():
                     )
 
                     letter_row = []
+
                     for lm in hand_landmarks.landmark:
                         letter_row += [lm.x, lm.y]
 
                     if len(letter_row) == 42:
 
-                        inp = np.array(letter_row, dtype=np.float32).reshape(1, 1, 42)
+                        inp = np.array(
+                            letter_row,
+                            dtype=np.float32
+                        ).reshape(1, 1, 42)
 
-                        pred = letter_model.predict(inp, verbose=0)
+                        pred = letter_model.predict(
+                            inp,
+                            verbose=0
+                        )
+
                         idx = np.argmax(pred)
+
                         conf = float(pred[0][idx])
 
                         if conf > 0.85:
+
                             try:
                                 letter = letter_encoder.inverse_transform([idx])[0]
+
                             except:
                                 letter = str(idx)
 
-                            current_word += letter
+                            now = time.time()
 
-        # ================= UI =================
-        cv2.rectangle(frame, (0, 0), (1200, 150), (0, 0, 0), -1)
+                            # PREVENT SPAMMING SAME LETTER
+                            if len(current_word) == 0 or letter != current_word[-1]:
 
-        cv2.putText(frame, f"Mode: {mode}",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                                current_word += letter
 
-        cv2.putText(frame, "Word: " + current_word,
-                    (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                            last_detection_time = now
 
-        cv2.putText(frame, "Sentence: " + sentence,
-                    (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        
+        if mode == "letter":
+
+            now = time.time()
+
+            if (
+                len(current_word) > 0 and
+                (now - last_detection_time) > LETTER_TIMEOUT
+            ):
+
+                sentence += current_word + " "
+
+                print("WORD FORMED:", current_word)
+
+                current_word = ""
+
+       
+        cv2.rectangle(
+            frame,
+            (0, 0),
+            (1200, 150),
+            (0, 0, 0),
+            -1
+        )
+
+        cv2.putText(
+            frame,
+            f"Mode: {mode}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            "Word: " + current_word,
+            (10, 70),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            "Sentence: " + sentence,
+            (10, 110),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2
+        )
 
         _, buffer = cv2.imencode(".jpg", frame)
+
         frame = buffer.tobytes()
 
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' +
-               frame + b'\r\n')
+        yield (
+            b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' +
+            frame +
+            b'\r\n'
+        )
 
     cap.release()
 
-# ================= ROUTES (UNCHANGED) =================
+
 @app.route('/')
 def home():
     return render_template('index.html')
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+    return Response(
+        generate_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 @app.route('/get_sentence')
 def get_sentence():
-    return jsonify({"sentence": sentence, "mode": mode})
+
+    return jsonify({
+        "sentence": sentence,
+        "mode": mode
+    })
 
 @app.route('/set_mode/<m>')
 def set_mode(m):
-    global mode, sequence, predictions, current_word, last_word
 
-    mode = m
-    sequence.clear()
-    predictions.clear()
-    current_word = ""
-    last_word = ""
+    global mode
+    global sequence
+    global predictions
+    global current_word
+    global last_word
 
-    return jsonify({"mode": mode})
+    if m in ["letter", "word"]:
+
+        mode = m
+
+        sequence.clear()
+        predictions.clear()
+
+        current_word = ""
+        last_word = ""
+
+    return jsonify({
+        "mode": mode
+    })
 
 @app.route('/clear')
 def clear():
-    global sentence, current_word, sequence, predictions, last_word
+
+    global sentence
+    global current_word
+    global sequence
+    global predictions
+    global last_word
 
     sentence = ""
     current_word = ""
+
     sequence.clear()
     predictions.clear()
+
     last_word = ""
 
-    return jsonify({"status": "cleared"})
+    return jsonify({
+        "status": "cleared"
+    })
 
 @app.route('/sign_to_text')
 def sign_to_text():
@@ -287,10 +400,18 @@ def sign_to_text():
 def text_to_sign():
     return render_template('text_to_sign.html')
 
-# ================= START =================
+
 def open_browser():
     webbrowser.open_new("http://127.0.0.1:5000/")
 
+
 if __name__ == "__main__":
+
     Timer(2, open_browser).start()
-    app.run(debug=False)
+
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=False,
+        use_reloader=False
+    )
