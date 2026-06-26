@@ -63,6 +63,18 @@ img{
     word-wrap:break-word;
 }
 
+.mode-box{
+    width:720px;
+    margin:15px auto;
+    background:white;
+    border-radius:20px;
+    padding:15px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.08);
+    font-size:18px;
+    font-weight:600;
+    color:#0f172a;
+}
+
 .buttons{
     margin-top:25px;
 }
@@ -72,15 +84,35 @@ img{
     padding:12px 22px;
     margin:10px;
     border-radius:12px;
-    background:#0f172a;
     color:white;
     cursor:pointer;
     font-size:16px;
     transition:0.2s;
+    font-weight:600;
 }
 
 .btn:hover{
-    background:#06b6d4;
+    transform:translateY(-2px);
+}
+
+.letter-btn{
+    background:#0f172a;
+}
+
+.word-btn{
+    background:#0f172a;
+}
+
+.reset-btn{
+    background:#0f172a;
+}
+
+.erase-btn{
+    background:#0f172a;
+}
+
+.dashboard-btn{
+    background:#0f172a;
 }
 
 </style>
@@ -92,6 +124,11 @@ img{
 
 <div class="video-box">
     <img src="{{ url_for('video_feed') }}">
+</div>
+
+<div class="mode-box">
+    Current Mode:
+    <span id="mode">Letter</span>
 </div>
 
 <div class="sentence-box">
@@ -108,19 +145,23 @@ img{
 
 <div class="buttons">
 
-    <button class="btn" onclick="setMode('letter')">
+    <button class="btn letter-btn" onclick="setMode('letter')">
         Letter Mode
     </button>
 
-    <button class="btn" onclick="setMode('word')">
+    <button class="btn word-btn" onclick="setMode('word')">
         Word Mode
     </button>
 
-    <button class="btn" onclick="clearAll()">
+    <button class="btn erase-btn" onclick="eraseLastWord()">
+        Erase Last Word
+    </button>
+
+    <button class="btn reset-btn" onclick="clearAll()">
         Reset
     </button>
 
-    <button class="btn" onclick="goDashboard()">
+    <button class="btn dashboard-btn" onclick="goDashboard()">
         Back to Dashboard
     </button>
 
@@ -130,7 +171,14 @@ img{
 
 function setMode(mode){
 
-    fetch('/set_mode/' + mode);
+    fetch('/set_mode/' + mode)
+    .then(response => response.json())
+    .then(data => {
+
+        document.getElementById("mode").innerText =
+            data.mode;
+
+    });
 
 }
 
@@ -139,6 +187,19 @@ function clearAll(){
     fetch('/clear');
 
     document.getElementById("sentence").innerText = "-";
+
+}
+
+function eraseLastWord(){
+
+    fetch('/erase_last')
+    .then(response => response.json())
+    .then(data => {
+
+        document.getElementById("sentence").innerText =
+            data.sentence || "-";
+
+    });
 
 }
 
@@ -156,6 +217,9 @@ function updateData(){
 
         document.getElementById("sentence").innerText =
             data.sentence || "-";
+
+        document.getElementById("mode").innerText =
+            data.mode;
 
     });
 

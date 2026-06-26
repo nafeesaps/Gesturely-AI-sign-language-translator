@@ -113,7 +113,16 @@ cooldown = 1.5
 
 # LETTER TIMER
 last_detection_time = time.time()
-LETTER_TIMEOUT = 2.0
+
+# slower sentence formation
+LETTER_TIMEOUT = 4.0
+
+# repeat control
+last_letter = ""
+last_letter_time = 0
+
+# same letter allowed only after delay
+REPEAT_DELAY = 2.0
 
 
 def generate_frames():
@@ -128,6 +137,9 @@ def generate_frames():
     global last_word
     global last_time
     global last_detection_time
+
+    global last_letter
+    global last_letter_time
 
     cap = cv2.VideoCapture(0)
 
@@ -150,7 +162,6 @@ def generate_frames():
             try:
                 results = process_frame(frame)
 
-                
                 if results.multi_hand_landmarks:
 
                     for hand_landmarks in results.multi_hand_landmarks:
@@ -204,7 +215,6 @@ def generate_frames():
             except Exception as e:
                 print("WORD ERROR:", e)
 
-
         elif mode == "letter" and letter_model:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -252,14 +262,28 @@ def generate_frames():
 
                             now = time.time()
 
-                            # PREVENT SPAMMING SAME LETTER
-                            if len(current_word) == 0 or letter != current_word[-1]:
+                            allow = False
+
+                            # new letter
+                            if letter != last_letter:
+                                allow = True
+
+                            # same letter after delay
+                            elif (now - last_letter_time) > REPEAT_DELAY:
+                                allow = True
+
+                            if allow:
 
                                 current_word += letter
 
+                                print("LETTER:", letter)
+
+                                last_letter = letter
+                                last_letter_time = now
+
                             last_detection_time = now
 
-        
+        # LETTER WORD CREATION
         if mode == "letter":
 
             now = time.time()
@@ -275,7 +299,8 @@ def generate_frames():
 
                 current_word = ""
 
-       
+                last_letter = ""
+
         cv2.rectangle(
             frame,
             (0, 0),
@@ -332,6 +357,7 @@ def generate_frames():
 def home():
     return render_template('index.html')
 
+
 @app.route('/video_feed')
 def video_feed():
 
@@ -339,6 +365,7 @@ def video_feed():
         generate_frames(),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
 
 @app.route('/get_sentence')
 def get_sentence():
@@ -348,6 +375,7 @@ def get_sentence():
         "mode": mode
     })
 
+
 @app.route('/set_mode/<m>')
 def set_mode(m):
 
@@ -356,6 +384,7 @@ def set_mode(m):
     global predictions
     global current_word
     global last_word
+    global last_letter
 
     if m in ["letter", "word"]:
 
@@ -366,10 +395,12 @@ def set_mode(m):
 
         current_word = ""
         last_word = ""
+        last_letter = ""
 
     return jsonify({
         "mode": mode
     })
+
 
 @app.route('/clear')
 def clear():
@@ -379,6 +410,7 @@ def clear():
     global sequence
     global predictions
     global last_word
+    global last_letter
 
     sentence = ""
     current_word = ""
@@ -387,14 +419,35 @@ def clear():
     predictions.clear()
 
     last_word = ""
+    last_letter = ""
 
     return jsonify({
         "status": "cleared"
     })
 
+@app.route('/erase_last')
+def erase_last():
+
+    global sentence
+
+    words = sentence.strip().split()
+
+    if len(words) > 0:
+        words.pop()
+
+    sentence = " ".join(words)
+
+    if len(sentence) > 0:
+        sentence += " "
+
+    return jsonify({
+        "sentence": sentence
+    })
+    
 @app.route('/sign_to_text')
 def sign_to_text():
     return render_template('sign_to_text.html')
+
 
 @app.route('/text_to_sign')
 def text_to_sign():
